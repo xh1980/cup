@@ -1,0 +1,14 @@
+db:
+  url: ${DB_URL:jdbc:postgresql://localhost:5432/appdb}
+  username: ${DB_USER:root}
+  password: ${DB_PASS:123456}
+  driver: ${DB_DRIVER:com.mysql.cj.jdbc.Driver}
+  maxPoolSize: ${DB_POOL_SIZE:10}
+app:
+  package: ${APP_PACKAGE:com.embrace.cup}
+controller:
+  packages: ${CONTROLLER_PACKAGE:api,act}
+job:
+  package: ${JOB_PACKAGE:job}
+web:
+  port: ${PORT:8080}

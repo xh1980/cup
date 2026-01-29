@@ -1,0 +1,29 @@
+# git
+.git
+.gitignore
+
+# target（交给 Docker 构建，不拷本地编译结果）
+target/
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# OS
+.DS_Store
+
+# Node
+node_modules/
+dist/
+build/
+
+# logs
+logs/
+*.log
+
+# env / secrets
+.env
+.env.*
+*.pem
+*.key
