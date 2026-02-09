@@ -1,16 +1,22 @@
 package com.embrace.cup.act;
 
+import java.util.Map;
+
 import com.embrace.cup.zoo.Context;
 import com.embrace.cup.zoo.Handler;
 import com.embrace.cup.zoo.ResponseJson;
 import com.embrace.cup.zoo.ResponseWeb;
+import com.embrace.cup.zoo.AuthInfo;
 
-public class P0001A01 implements Handler {
+
+
+public class Logout implements Handler {
 
     @Override
     public ResponseWeb handle(Context ctx) {
-
-        return ResponseJson.ok(ctx.getParameters());
+        
+        AuthInfo.logout();
+        return ResponseJson.ok(Map.of("message", "logout success"));
     }
-
+    
 }

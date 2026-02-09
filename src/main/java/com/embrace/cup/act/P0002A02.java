@@ -1,8 +1,7 @@
 package com.embrace.cup.act;
 
-import java.util.Map;
-
-import com.embrace.cup.zoo.ErrorJsonService;
+import com.embrace.cup.zoo.Context;
+import com.embrace.cup.zoo.ErrorJson;
 import com.embrace.cup.zoo.Handler;
 import com.embrace.cup.zoo.ResponseWeb;
 
@@ -11,8 +10,8 @@ public class P0002A02 implements Handler {
     private static final String ERR_E01_MSG  = "エラー１";
 
     @Override
-    public ResponseWeb handle(Map<String, Object> params) {
+    public ResponseWeb handle(Context ctx) {
 
-        throw new ErrorJsonService(ERR_E01_CODE, ERR_E01_MSG);
+        throw new ErrorJson(ERR_E01_CODE, ERR_E01_MSG);
     }
 }

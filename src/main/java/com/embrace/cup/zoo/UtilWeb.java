@@ -7,7 +7,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-public class WebUtil {
+public class UtilWeb {
 
     public static Map<String, Object> getCookies(HttpServletRequest req) {
         Cookie[] cookies = req.getCookies();
@@ -33,9 +33,9 @@ public class WebUtil {
         return null;
     }
 
-    public static void setCookie(HttpServletResponse resp, String name, String value, int age) {
+    public static void setCookie(HttpServletResponse resp, String name, String value, int ageSeconds) {
         Cookie cookie = new Cookie(name, value);
-        cookie.setMaxAge(age);
+        cookie.setMaxAge(ageSeconds);
         cookie.setPath("/");
         cookie.setHttpOnly(true); 
         resp.addCookie(cookie);

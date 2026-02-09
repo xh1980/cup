@@ -5,8 +5,6 @@ import jakarta.servlet.http.*;
 import jakarta.servlet.*;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -17,99 +15,87 @@ public class Dispatcher extends HttpServlet {
     // private static final ConcurrentMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentMap<String, Handler> HANDLER_CACHE = new ConcurrentHashMap<>();
     private static final String LOGTAG = "Dispatcher";
-    private static final String APP_PACKAGE = Config.get("app.package");
     private static final ObjectMapper JSONMAPPER = new ObjectMapper();
-    private static final String SESSION_COOKIE_NAME = "ctxid";
-    private static final int SESSION_AGE = 60*60*6;
-    private static final SessionManager sessManager = new SessionManager();
-    private static final String[] PACKAGE_ARRAY;
-
-    static {
-        String cps = Config.get("controller.packages");
-        String[] arr = cps.split(",");
-        PACKAGE_ARRAY = Arrays.stream(arr)
-            .filter(s -> s != null && !s.trim().isEmpty())
-            .toArray(String[]::new);
-        if (PACKAGE_ARRAY.length <= 0)
-            throw new RuntimeException("controller.packages error! check application.yml");
-    }
 
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp) {
-        String classFullName = "";
+
         try {
             Log.setRequestId();
-            RequestContext.set(new HashMap<>());
+            Context ctx = new Context();
+            ContextHolder.set(ctx);
+            ctx.setHttpRequest(req);
+            ctx.setHttpResponse(resp);
 
-            classFullName = getClassFullName(req, resp);
-            if (classFullName == null) { send404(req, resp); return; }
+            var allowed = List.of("GET", "POST");
+            String httpMethod = req.getMethod();
+            if (!allowed.contains(httpMethod)) 
+                { send405(req, resp); return; }
+                
+            setPathToContext(req, resp);
+            String classFullName = ctx.getClassFullName();
+            if (classFullName == null || classFullName.isBlank()) 
+                { send404(req, resp); return; }
 
             Handler handler = getHandler(classFullName);
             
             if (handler == null)  { send404(req, resp); return; }
 
-            Map<String, Object> paramMap = buildParamMap(req); // construct parameters Map
-            
-            getSession(req, resp); // session to RequestContext
-            
-            if (!checkLogin()) { send401(req, resp); return; }
+            Map<String, Object> paramMap = buildParamMap(req);
+            ctx.setParameters(paramMap);
 
+            sessionToContext(req, resp);
+
+            if (!checkLogin()) { send401(req, resp); return; }
             if (!checkPermission()) { send403(req, resp); return; }
             
             Log.info(LOGTAG, "before " + classFullName);
-            ResponseWeb result = handler.handle(paramMap);
+            ResponseWeb result = handler.handle(ctx);
             Log.info(LOGTAG, "after  " + classFullName);
             
             if (result != null) {
                 result.render(req, resp);
             } else {
-                Log.error(LOGTAG, handler.getClass().getSimpleName() + " handler return null");
+                Log.error(
+                    LOGTAG, 
+                    handler.getClass().getSimpleName() + " handler return null");
                 send500(req, resp);
             }
 
         } catch (ClassNotFoundException e) {
             send404(req, resp);
-        } catch (NoSuchMethodException e) {
-            send404(req, resp);
-        } catch (InvocationTargetException  e) {
-            
         } catch (ErrorJson ej) {
             sendErrorJson(req, resp, ej);
         } catch (Exception e) {
             send500(req, resp);
             e.printStackTrace();
-
         } finally {
             Log.clearRequestId();
-            RequestContext.clear();
+            ContextHolder.clear();
         }
     }
 
 
-    private String getClassFullName(HttpServletRequest req, HttpServletResponse resp) {
+    private void setPathToContext(HttpServletRequest req, HttpServletResponse resp) {
         String uri = req.getRequestURI();
         Log.info(LOGTAG, "uri:" + uri);
 
-        var ctxData = RequestContext.get();
-        // String context_path = req.getContextPath();
-        // String servlet_path = req.getServletPath();
-        // String path = req.getPathInfo();
-        ctxData.put("uri", uri);
+        Context ctx = ContextHolder.get();
+        ctx.setUri(uri);
 
-        // split uri
         String[] parts = uri.substring(1).split("/");
-        if (parts.length < 2) return null;
+        if (parts.length < 2) return;
 
         String packageName = parts[0];
         String className = parts[1];
+        ctx.setPackageName(packageName);
+        ctx.setClassName(className);
         
-        if (!Arrays.asList(PACKAGE_ARRAY).contains(packageName)) return null;
-        
-        String classFullName = APP_PACKAGE + "." + packageName + "." + className;
-        ctxData.put("classFullName", classFullName);
-        ctxData.put("className", className);
+        String classFullName = ConfigHolder.APP_PACKAGE 
+                            + "." + packageName 
+                            + "." + className;
+        ctx.setClassFullName(classFullName);
 
-        return classFullName;
     }
 
        
@@ -136,73 +122,60 @@ public class Dispatcher extends HttpServlet {
         return h;
     }
 
-    // private Class<?> getActionClass(String classFullName) 
-    // throws ClassNotFoundException {
-    //     Class<?> clazz = CLASS_CACHE.get(classFullName);
-    //     if (clazz == null) {
-    //         clazz = Class.forName(classFullName);
-    //         Class<?> existing = CLASS_CACHE.putIfAbsent(classFullName, clazz);
-    //         if (existing != null) {
-    //             clazz = existing; // 另一线程已经放进去
-    //         }
-    //     }
-    //     return clazz;
-    // }
+    private void sessionToContext(HttpServletRequest req, HttpServletResponse resp) {
 
-    // private Method getHandlerMethod(String classFullName, String methodName) 
-    // throws ClassNotFoundException, NoSuchMethodException{
-        
-    //     String key = classFullName + "#" + methodName;
-    //     Method m = METHOD_CACHE.get(key);
-    //     if (m == null) {
-    //         Class<?> clazz = getActionClass(classFullName);
-    //         m = clazz.getMethod(methodName, Map.class);
-    //         Method existing = METHOD_CACHE.putIfAbsent(key, m);
-    //         if (existing != null) {
-    //             m = existing;
-    //         }
-    //     }
-        
-    //     return m;
-    // }
+        Context ctx = ContextHolder.get();
+        AuthInfo authInfo = new AuthInfo();
+        authInfo.setAuthenticated(false);
+        ctx.setAuthInfo(authInfo);
 
-    private void getSession(HttpServletRequest req, HttpServletResponse resp) {
-        // get cookie set RequestContext
-        String sessionId = WebUtil.getCookie(req, SESSION_COOKIE_NAME);
+        String sessionId = UtilWeb.getCookie(req, ConfigHolder.SESSION_COOKIE_NAME);
         if (sessionId == null) return;
         
-        Map<String, Object> ctxData = RequestContext.get();
-        ctxData.put("sessionId", sessionId);
-        
-        Map<String, Object> sessData = sessManager.getSessionData(sessionId);
+        SessionManager manager = ConfigHolder.SESSION_MANAGER;
+        Map<String, Object> sessData = manager.getSessionData(sessionId);
         if (sessData == null) return;
 
-        ctxData.putAll(sessData);
-        sessionId = sessManager.saveSessionData(sessData, SESSION_AGE, sessionId);
-        WebUtil.setCookie(resp, SESSION_COOKIE_NAME, sessionId, SESSION_AGE);
+        authInfo.fromMap(sessData);
+        sessionId = manager.saveSessionData(sessData, 
+            ConfigHolder.SESSION_AGE, sessionId
+        );
+        ctx.setSessionId(sessionId);
+
+        UtilWeb.setCookie(
+            resp, ConfigHolder.SESSION_COOKIE_NAME, 
+            sessionId, ConfigHolder.SESSION_AGE
+        );
     }
 
     private boolean checkLogin() {
-        Map<String,Object> ctxData = RequestContext.get();
-        Boolean loginRequired = Boolean.TRUE.equals(ctxData.get("loginRequired"));
-        Boolean authenticated =  Boolean.TRUE.equals(ctxData.get("authenticated"));
-        if (loginRequired == true) {
-            if (authenticated == false) return false;
-        }
-        return true;
+        Context ctx = ContextHolder.get();
+
+        String className = ctx.getClassName();
+        if (ConfigHolder.AUTH_EXCLUDE_LIST.contains(className)) return true;
+
+        AuthInfo authInfo = ctx.getAuthInfo();
+        if (authInfo.getAuthenticated()) return true;
+        
+        return false;
     }
 
     private boolean checkPermission() {
-        Map<String,Object> ctxData = RequestContext.get();
-        Boolean loginRequired = Boolean.TRUE.equals(ctxData.get("loginRequired"));
-        String[] perms = (String[])ctxData.get("permissions");
-        String className = (String)ctxData.get("className");
-        if (loginRequired == true) {
-            if (perms == null) return false;
-            if (!Arrays.asList(perms).contains(className)) return false;
-        }
+        Context ctx = ContextHolder.get();
+        AuthInfo authInfo = ctx.getAuthInfo();
+
+        List<String> perms = authInfo.getPerms();
+        String className = ctx.getClassFullName();
         
-        return true;
+        if (className == null) return false;
+
+        if (ConfigHolder.AUTH_EXCLUDE_LIST.contains(className)) return true;
+        if (ConfigHolder.AUTH_DEFAULT_PERM_LIST.contains(className)) return true;
+        
+        if (perms == null) return false;
+        if (perms.contains(className)) return true;
+        
+        return false;
     }
 
     private void send401(HttpServletRequest req, HttpServletResponse resp) {
@@ -259,6 +232,22 @@ public class Dispatcher extends HttpServlet {
         }
     }
     
+    private void send405(HttpServletRequest req, HttpServletResponse resp) {
+        resp.setStatus(404);
+        resp.setContentType("text/html;charset=UTF-8");
+        try {
+            PrintWriter out = resp.getWriter();
+            out.write("<!DOCTYPE html><html><head><title>Error</title></head><body>");
+            out.write("<h1>HTTP Status " + resp.getStatus() + "</h1>");
+            out.write("<p>Resource not found</p>");
+            out.write("</body></html>");
+            out.flush();
+        } catch (IOException ie) {
+            Log.error(LOGTAG, "send405 io error");
+            ie.printStackTrace();
+        }
+    }
+    
     private void send500(HttpServletRequest req, HttpServletResponse resp){
         resp.setStatus(500);
         resp.setContentType("application/json;charset=UTF-8");
@@ -285,12 +274,12 @@ public class Dispatcher extends HttpServlet {
             err.getMessage()
         );
         Log.error(LOGTAG, errMsg);
-        resp.setStatus(err.status);
+        resp.setStatus(200);
         resp.setContentType("application/json;charset=utf-8");
         try {
             JSONMAPPER.writeValue(
                 resp.getOutputStream(),
-                Map.of("code",err.code, "message",err.getMessage())
+                Map.of("code", err.code, "message", err.getMessage())
             );
         } catch (Exception jsonEx) {
             Log.error(LOGTAG, jsonEx.getMessage());
@@ -351,16 +340,6 @@ public class Dispatcher extends HttpServlet {
 
         return map;
     }
-
-    // private void forwardTo404(HttpServletRequest req, HttpServletResponse resp) {
-    //     RequestDispatcher dispatcher = getServletContext().getNamedDispatcher("default");
-    //     try {
-    //             dispatcher.forward(req, resp);
-    //     } catch (ServletException | IOException e1) {
-    //         e1.printStackTrace();
-    //         resp.setStatus(404);
-    //     }
-    // }
 
 // end of class
 }

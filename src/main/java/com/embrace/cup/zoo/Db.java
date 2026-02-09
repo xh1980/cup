@@ -21,11 +21,11 @@ public class Db {
     private static void init() {
         try {
             HikariDataSource ds = new HikariDataSource();
-            ds.setJdbcUrl(Config.get("db.url"));
-            ds.setUsername(Config.get("db.username"));
-            ds.setPassword(Config.get("db.password"));
-            ds.setDriverClassName(Config.get("db.driver"));
-            ds.setMaximumPoolSize(Integer.parseInt(Config.get("db.maxPoolSize")));
+            ds.setJdbcUrl(ConfigHolder.DB_URL);
+            ds.setUsername(ConfigHolder.DB_USERNAME);
+            ds.setPassword(ConfigHolder.DB_PASSWORD);
+            ds.setDriverClassName(ConfigHolder.DB_DRIVER);
+            ds.setMaximumPoolSize(ConfigHolder.DB_POOL_SIZE);
             ds.setPoolName("AppPool");
 
             dataSource = ds;

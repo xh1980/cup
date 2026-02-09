@@ -7,7 +7,7 @@ import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.webresources.StandardRoot;
 
-import com.embrace.cup.zoo.Config;
+import com.embrace.cup.zoo.ConfigHolder;
 import com.embrace.cup.zoo.JobExecutor;
 import com.embrace.cup.zoo.Log;
 
@@ -28,9 +28,9 @@ public class App {
         
         Log.info("main", "Run job ...");
         String jobName = args[0].substring(4).trim();
-        String appPackage = Config.get("app.package");
-        String jobPackage = Config.get("job.package");
-        String classFullName = appPackage + "." + jobPackage + "." + jobName;
+        String classFullName = ConfigHolder.APP_PACKAGE 
+                                + "." + ConfigHolder.JOB_PACKAGE 
+                                + "." + jobName;
         String [] jobParams = Arrays.copyOfRange(args, 1, args.length);
         try {
             Log.info("main", classFullName);
@@ -73,8 +73,7 @@ public class App {
 
     static Tomcat createTomcat(){
         Tomcat tomcat = new Tomcat();
-        String webPort = Config.get("web.port");
-        tomcat.setPort(Integer.parseInt(webPort));
+        tomcat.setPort(Integer.parseInt(ConfigHolder.APP_PORT));
         tomcat.getConnector(); // silly needed call
         
         File base = new File("tomcat");
@@ -97,25 +96,6 @@ public class App {
             )
         );
         context.addServletMappingDecoded("/*", "dispatcher");
-        
-        // String cps = Config.get("controller.packages");
-        // String[] cpArr = cps.split(",");
-        // for (String p : cpArr) {
-        //     if (!p.trim().isEmpty()) {
-        //         context.addServletMappingDecoded("/"+p+"/*", "dispatcher");
-        //     }
-        // }
-        
-        // context.addServletMappingDecoded("/api/*", "dispatcher");
-        
-        // Tomcat.addServlet(
-        //     context,
-        //     "default", 
-        //     new com.embrace.cup.zoo.DefaultServlet()
-        // );
-        
-        // context.addServletMappingDecoded("/*", "default");
-
 
         return tomcat;
     }
