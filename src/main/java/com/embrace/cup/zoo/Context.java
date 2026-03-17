@@ -19,6 +19,8 @@ public class Context {
     private String classFullName;
     private String uri;
     private String sessionId;
+    private Boolean hasCookie;
+    private Boolean logout;
     
 
 }

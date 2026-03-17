@@ -57,7 +57,7 @@ public class UtilWeb {
             String token = auth.substring(7);
             return token;
         } else {
-            return auth;
+            return null;
         }
     }
 }

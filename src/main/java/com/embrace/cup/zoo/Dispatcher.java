@@ -54,6 +54,7 @@ public class Dispatcher extends HttpServlet {
             Log.info(LOGTAG, "after  " + classFullName);
             
             if (result != null) {
+                setResponseCookie(req, resp);
                 result.render(req, resp);
             } else {
                 Log.error(
@@ -130,6 +131,12 @@ public class Dispatcher extends HttpServlet {
         ctx.setAuthInfo(authInfo);
 
         String sessionId = UtilWeb.getCookie(req, ConfigHolder.SESSION_COOKIE_NAME);
+        if (sessionId != null) {
+            ctx.setHasCookie(true);
+        } else {
+            sessionId = UtilWeb.getAuthrizationHeader(req);
+        }
+        
         if (sessionId == null) return;
         
         SessionManager manager = ConfigHolder.SESSION_MANAGER;
@@ -137,17 +144,29 @@ public class Dispatcher extends HttpServlet {
         if (sessData == null) return;
 
         authInfo.fromMap(sessData);
-        sessionId = manager.saveSessionData(sessData, 
-            ConfigHolder.SESSION_AGE, sessionId
-        );
-        ctx.setSessionId(sessionId);
-
-        UtilWeb.setCookie(
-            resp, ConfigHolder.SESSION_COOKIE_NAME, 
-            sessionId, ConfigHolder.SESSION_AGE
-        );
+        
     }
 
+    private void setResponseCookie(HttpServletRequest req, HttpServletResponse resp) {
+        Context ctx = ContextHolder.get();
+        String sessionId = ctx.getSessionId();
+        if (sessionId == null) return;
+        SessionManager manager = ConfigHolder.SESSION_MANAGER;
+        Map<String, Object> sessData = manager.getSessionData(sessionId);
+        if (sessData == null) return;
+        
+        if (ctx.getHasCookie()){
+            int sessionAge = ConfigHolder.SESSION_AGE;
+            if (ctx.getLogout()) sessionAge = 0;
+
+            sessionId = manager.saveSessionData(
+                sessData, sessionAge, sessionId
+            );
+            UtilWeb.setCookie(
+                resp, ConfigHolder.SESSION_COOKIE_NAME, sessionId, sessionAge
+            );
+        }
+    }
     private boolean checkLogin() {
         Context ctx = ContextHolder.get();
 
@@ -301,7 +320,7 @@ public class Dispatcher extends HttpServlet {
         if (contentType == null) return map;
 
         // JSON body
-        if (contentType.startsWith("application/json")) {
+        if (contentType.contains("json")) {
             String body = req.getReader().lines().reduce("", (a, b) -> a + b);
             // map.put("_rawBody", body);
 
@@ -310,10 +329,14 @@ public class Dispatcher extends HttpServlet {
                 
                 map.putAll(json);
             }
-        }
-
-        // 文件上传 multipart/form-data
-        if (contentType.startsWith("multipart/form-data")) {
+        } else if (contentType.contains("application/x-www-form-urlencoded")){
+            Map<String, String[]> paramMap = req.getParameterMap();
+        
+            for (Map.Entry<String, String[]> entry : paramMap.entrySet()) {
+                String[] values = entry.getValue();
+                map.put(entry.getKey(), values.length == 1 ? values[0] : values);
+            }
+        } else if (contentType.contains("multipart/form-data")) {
             for (Part part : req.getParts()) {
 
                 String name = part.getName();
@@ -329,9 +352,7 @@ public class Dispatcher extends HttpServlet {
                     } else if (existing instanceof List<?> list) {
                         ((List<Part>) list).add(part);
                     }
-                }
-                // 普通字段
-                else {
+                } else {
                     String value = new String(part.getInputStream().readAllBytes(), "UTF-8");
                     map.put(name, value);
                 }
