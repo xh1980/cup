@@ -1,14 +1,13 @@
-package com.embrace.cup.act;
+package com.embrace.cup.auth;
 
 import java.util.List;
 import java.util.Map;
 
 import com.embrace.cup.zoo.AuthInfo;
 import com.embrace.cup.zoo.Context;
-import com.embrace.cup.zoo.ErrorJson;
+import com.embrace.cup.zoo.HandlerTextError;
 import com.embrace.cup.zoo.Handler;
 import com.embrace.cup.zoo.Log;
-import com.embrace.cup.zoo.ResponseRedirect;
 import com.embrace.cup.zoo.ResponseWeb;
 
 public class Login implements Handler {
@@ -21,7 +20,7 @@ public class Login implements Handler {
         Log.info(LOGTAG, "----------------------------------------");
         Boolean authenticated = ctx.getAuthInfo().getAuthenticated();
 
-        if (authenticated == true) return ResponseRedirect.to("/");
+        if (authenticated == true) return ctx.renderRedirect("/");
         
         Map<String, Object> params = ctx.getParameters();
 
@@ -38,10 +37,23 @@ public class Login implements Handler {
                 "E00001"
             );
             
-            return ResponseRedirect.to("/");
+            return ctx.renderRedirect("/");
         } else {
-            throw new ErrorJson(E01_CODE, E01_MSG);
+            throw new HandlerTextError(E01_CODE, E01_MSG);
         }
         
+    }
+    
+    @Override
+    public List<String> allowedMethods() {
+        return List.of("POST", "GET");
+    }
+    @Override
+    public Boolean LoginRequired() {
+       return false;
+    }
+    @Override
+    public Boolean PermissionRequired() {
+       return false;
     }
 }

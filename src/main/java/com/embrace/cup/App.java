@@ -1,8 +1,19 @@
 package com.embrace.cup;
 
 import java.io.File;
+import java.io.IOException; 
 import java.lang.reflect.InvocationTargetException;
+import java.net.URISyntaxException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
+import java.util.stream.Stream;
+import java.net.URL;
+
 import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.webresources.StandardRoot;
@@ -10,6 +21,9 @@ import org.apache.catalina.webresources.StandardRoot;
 import com.embrace.cup.zoo.ConfigHolder;
 import com.embrace.cup.zoo.JobExecutor;
 import com.embrace.cup.zoo.Log;
+
+// 删除错误的导入
+// import io.jsonwebtoken.io.IOException;
 
 public class App {
     public static void main(String[] args) throws Exception {
@@ -43,8 +57,6 @@ public class App {
             } else {
                 throw new RuntimeException("Class is not JobExecutor");
             }
-            // Method m = clazz.getMethod("execute", String[].class);
-            // m.invoke(null, (Object)jobParams);
             
         } catch (ClassNotFoundException cnfe) {
             Log.info("main", "job class not found");
@@ -76,8 +88,21 @@ public class App {
         tomcat.setPort(Integer.parseInt(ConfigHolder.APP_PORT));
         tomcat.getConnector(); // silly needed call
         
-        File base = new File("tomcat");
+        // 修正：删除重复的 base 定义，只保留一个
+        File base = new File(System.getProperty("java.io.tmpdir"), "tomcat-webapp");
+        if (base.exists()) {
+            deleteDirectory(base);
+        }
         base.mkdirs();
+        
+        // 复制资源，处理异常
+        try {
+            copyResources("/webapp", base);
+        } catch (IOException | URISyntaxException e) {
+            Log.info("createTomcat", "Failed to copy resources: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
         var context = tomcat.addContext("", base.getAbsolutePath());
 
         WebResourceRoot resources = new StandardRoot(context);
@@ -99,5 +124,114 @@ public class App {
 
         return tomcat;
     }
+    
+    private static void copyResources(String resourcePath, File targetDir) throws IOException, URISyntaxException {
+        URL resourceUrl = App.class.getResource(resourcePath);
+        if (resourceUrl == null) {
+            System.err.println("Resource does not exist: " + resourcePath);
+            return;
+        }
+        
+        // 处理文件系统和 JAR 两种情况
+        if (resourceUrl.getProtocol().equals("jar")) {
+            // 从 JAR 中复制
+            copyFromJar(resourceUrl, resourcePath, targetDir);
+        } else {
+            // 从文件系统复制（开发环境）
+            copyFromFileSystem(new File(resourceUrl.toURI()), targetDir);
+        }
+    }
+    
+    private static void copyFromJar(URL jarUrl, String resourcePath, File targetDir) {
+        try {
+            // 提取 JAR 文件路径
+            String jarFile = jarUrl.getPath().split("!")[0].substring(5);
+            
+            // 使用 FileSystem 访问 JAR 内部
+            try (FileSystem fs = FileSystems.newFileSystem(Paths.get(jarFile), (ClassLoader) null)) {
+                Path sourceRoot = fs.getPath(resourcePath);
+                
+                if (!Files.exists(sourceRoot)) {
+                    System.err.println("path in jar not found: " + resourcePath);
+                    return;
+                }
+                
+                // 遍历并复制所有文件
+                try (Stream<Path> walk = Files.walk(sourceRoot)) {
+                    walk.forEach(source -> {
+                        try {
+                            String relativePath = sourceRoot.relativize(source).toString();
+                            Path destination = Paths.get(targetDir.getAbsolutePath(), relativePath);
+                            
+                            if (Files.isDirectory(source)) {
+                                Files.createDirectories(destination);
+                            } else {
+                                Files.createDirectories(destination.getParent());
+                                Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
+                            }
+                        } catch (IOException e) {
+                            System.err.println("copy from jar failed: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+            
+            System.out.println("copy from jar succeeded");
+            
+        } catch (IOException e) {
+            System.err.println("copy from jar failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private static void copyFromFileSystem(File sourceDir, File targetDir) {
+        try {
+            if (!sourceDir.exists()) {
+                System.err.println("source folder not found: " + sourceDir.getAbsolutePath());
+                return;
+            }
+            
+            // 遍历并复制所有文件
+            try (Stream<Path> walk = Files.walk(sourceDir.toPath())) {
+                walk.forEach(source -> {
+                    try {
+                        Path relativePath = sourceDir.toPath().relativize(source);
+                        Path destination = Paths.get(targetDir.getAbsolutePath(), relativePath.toString());
+                        
+                        if (Files.isDirectory(source)) {
+                            Files.createDirectories(destination);
+                        } else {
+                            Files.createDirectories(destination.getParent());
+                            Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    } catch (IOException e) {
+                        System.err.println("copy from filesystem failed: " + e.getMessage());
+                    }
+                });
+            }
+            
+            System.out.println("copy from filesystem succeeded");
+            
+        } catch (IOException e) {
+            System.err.println("copy from filesystem failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private static void deleteDirectory(File dir) {
+        if (dir == null || !dir.exists()) {
+            return;
+        }
+        if (dir.isDirectory()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    deleteDirectory(file);
+                }
+            }
+        }
+        dir.delete();
+    }
+    
 // end of class
 }

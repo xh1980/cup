@@ -1,6 +1,5 @@
 package com.embrace.cup.zoo;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,12 +10,8 @@ public class ResponseJson implements ResponseWeb {
     private static final ObjectMapper mapper = new ObjectMapper();
     private final Object data;
 
-    private ResponseJson(Object data) {
+    public ResponseJson(Object data) {
         this.data = data;
-    }
-
-    public static ResponseJson ok(Object data) {
-        return new ResponseJson(data);
     }
 
     @Override

@@ -64,7 +64,6 @@ public class Log {
         }
     }
 
-    // ===== 给 Filter / Dispatcher 调用 =====
     public static void setRequestId() {
         REQUEST_ID.set(newRequestId());
     }
@@ -82,7 +81,7 @@ public class Log {
 
     // ===== 加载日志级别 =====
     private static Level loadLevel() {
-        String v = System.getenv("LOG_LEVEL");
+        String v = ConfigHolder.LOG_LEVEL;
         if (v == null || v.isBlank()) return Level.INFO;
 
         try {

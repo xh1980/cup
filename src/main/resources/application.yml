@@ -1,22 +1,23 @@
 app:
   port: ${APP_PORT:8080}
   package: ${APP_PACKAGE:com.embrace.cup}
-
+  handler-packages:
+    - act
+    - api
+    - auth
 job:
   package: ${JOB_PACKAGE:job}
-  
+
 session:
   cookie-name: ${SESS_COOKIE_NAME:sessid}
   age-minuts: ${SESS_AGE:120}
   manager: ${SESS_MANAGER:SessionManagerJwt}
   secret: ${SESS_SECRET:doi38eufjk!"#%$EWsdf89i32(&HFYdfw)"}
+log:
+  level: ${LOG_LEVEL:debug}
 db:
   url: ${DB_URL:jdbc:postgresql://localhost:5432/appdb}
   username: ${DB_USER:root}
   password: ${DB_PASS:123456}
   driver: ${DB_DRIVER:org.postgresql.Driver}
   maxPoolSize: ${DB_POOL_SIZE:10}
-
-auth:
-  exclude: ${AUTH_EXCLUDE:Login,Logout}
-  default-permissions:  ${AUTH_DEFAULT_PERMISSIONS:TaskFind}

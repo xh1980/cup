@@ -6,12 +6,8 @@ public class ResponseRedirect implements ResponseWeb {
 
     private final String location;
 
-    private ResponseRedirect(String location) {
+    public ResponseRedirect(String location) {
         this.location = location;
-    }
-
-    public static ResponseRedirect to(String url) {
-        return new ResponseRedirect(url);
     }
 
     @Override

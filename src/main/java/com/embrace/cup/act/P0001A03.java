@@ -1,6 +1,7 @@
 package com.embrace.cup.act;
 
-import java.util.Map;
+import java.nio.file.Path;
+import java.util.List;
 
 import com.embrace.cup.zoo.Context;
 import com.embrace.cup.zoo.Handler;
@@ -10,8 +11,20 @@ public class P0001A03 implements Handler {
 
     @Override
     public ResponseHtml handle(Context ctx) {
+        return ctx.renderHtml(Path.of("html/index.html"));
+    }
 
-        return ResponseHtml.fromFile("html/index.html");
+    @Override
+    public List<String> allowedMethods() {
+        return List.of("GET");
+    }
+    @Override
+    public Boolean LoginRequired() {
+       return false;
+    }
+    @Override
+    public Boolean PermissionRequired() {
+       return false;
     }
 }
 

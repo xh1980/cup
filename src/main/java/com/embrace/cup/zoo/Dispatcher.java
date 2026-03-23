@@ -5,70 +5,64 @@ import jakarta.servlet.http.*;
 import jakarta.servlet.*;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public class Dispatcher extends HttpServlet {
 
-    // private static final ConcurrentMap<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
-    // private static final ConcurrentMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentMap<String, Handler> HANDLER_CACHE = new ConcurrentHashMap<>();
     private static final String LOGTAG = "Dispatcher";
     private static final ObjectMapper JSONMAPPER = new ObjectMapper();
 
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp) {
-
+        Log.setRequestId();
+        Context ctx = new Context();
+        ContextHolder.set(ctx);
         try {
-            Log.setRequestId();
-            Context ctx = new Context();
-            ContextHolder.set(ctx);
             ctx.setHttpRequest(req);
             ctx.setHttpResponse(resp);
-
-            var allowed = List.of("GET", "POST");
-            String httpMethod = req.getMethod();
-            if (!allowed.contains(httpMethod)) 
-                { send405(req, resp); return; }
+            ctx.setServletContext(getServletContext());
+            ctx.setWebAppRoot(ctx.getServletContext().getRealPath("/"));
                 
-            setPathToContext(req, resp);
-            String classFullName = ctx.getClassFullName();
-            if (classFullName == null || classFullName.isBlank()) 
-                { send404(req, resp); return; }
+            setPathToContext(ctx);
 
-            Handler handler = getHandler(classFullName);
+            if (ctx.handlerPackageError()) { fallback(ctx); return; }
+
+            setHandler(ctx);
+
+            if (ctx.handlerError()) { send404(ctx); return; }
+
+            if (ctx.httpMethodError()) { send405(ctx); return; }
+
+            ctx.setParameters(buildParamMap(req));
+
+            setSessionToContext(ctx);
+
+            if (ctx.authError()) { send401(ctx); return; }
+            if (ctx.permissionError()) { send403(ctx); return; }
             
-            if (handler == null)  { send404(req, resp); return; }
-
-            Map<String, Object> paramMap = buildParamMap(req);
-            ctx.setParameters(paramMap);
-
-            sessionToContext(req, resp);
-
-            if (!checkLogin()) { send401(req, resp); return; }
-            if (!checkPermission()) { send403(req, resp); return; }
+            Log.info(LOGTAG, "before " + ctx.getClassFullName());
+            ctx.handle();
+            Log.info(LOGTAG, "after  " + ctx.getClassFullName());
             
-            Log.info(LOGTAG, "before " + classFullName);
-            ResponseWeb result = handler.handle(ctx);
-            Log.info(LOGTAG, "after  " + classFullName);
-            
-            if (result != null) {
-                setResponseCookie(req, resp);
-                result.render(req, resp);
-            } else {
-                Log.error(
-                    LOGTAG, 
-                    handler.getClass().getSimpleName() + " handler return null");
-                send500(req, resp);
+            if (ctx.resultError()) { 
+                throw new Exception(ctx.getClassFullName() + " handler return null");
             }
+            setResponseCookie(ctx);
 
-        } catch (ClassNotFoundException e) {
-            send404(req, resp);
-        } catch (ErrorJson ej) {
-            sendErrorJson(req, resp, ej);
+            ctx.render();
+
+        } catch (HandlerJsonError ej) {
+            sendHandlerJsonError(ctx, ej);
+        } catch (HandlerTextError et) {
+            sendHandlerTextError(ctx, et);
         } catch (Exception e) {
-            send500(req, resp);
+            send500(ctx);
             e.printStackTrace();
         } finally {
             Log.clearRequestId();
@@ -77,15 +71,16 @@ public class Dispatcher extends HttpServlet {
     }
 
 
-    private void setPathToContext(HttpServletRequest req, HttpServletResponse resp) {
+    private void setPathToContext(Context ctx) {
+        HttpServletRequest req = ctx.getHttpRequest();
         String uri = req.getRequestURI();
         Log.info(LOGTAG, "uri:" + uri);
 
-        Context ctx = ContextHolder.get();
         ctx.setUri(uri);
-
-        String[] parts = uri.substring(1).split("/");
-        if (parts.length < 2) return;
+        String uriStrip = uri.replaceAll("^/*|/*$", "");
+        //String[] parts = uri.substring(1).split("/");
+        String[] parts = uriStrip.split("/");
+        if (parts.length != 2)  return;
 
         String packageName = parts[0];
         String className = parts[1];
@@ -93,14 +88,16 @@ public class Dispatcher extends HttpServlet {
         ctx.setClassName(className);
         
         String classFullName = ConfigHolder.APP_PACKAGE 
-                            + "." + packageName 
+                            + "." + packageName
                             + "." + className;
         ctx.setClassFullName(classFullName);
+        Log.info(LOGTAG, classFullName);
 
     }
-
        
-    private Handler getHandler(String classFullName) {
+    private void setHandler(Context ctx) {
+        String classFullName = ctx.getClassFullName();
+        if (classFullName == null || classFullName.isBlank()) return;
 
         Handler h = HANDLER_CACHE.get(classFullName);
         if (h == null) {
@@ -112,20 +109,18 @@ public class Dispatcher extends HttpServlet {
                     Handler existing = HANDLER_CACHE.putIfAbsent(classFullName, h);
                     if (existing != null) h = existing;
                 } else {
-                    throw new Exception("Class is not Handler");
+                    Log.error(LOGTAG, classFullName + "Class is not Handler ");
                 }
             } catch (Exception e) {
-                Log.error(LOGTAG, classFullName + "handler create error");
+                Log.error(LOGTAG, classFullName + " handler create error");
                 e.printStackTrace();
             }
-        }   
-
-        return h;
+        }
+        ctx.setHandler(h); 
     }
 
-    private void sessionToContext(HttpServletRequest req, HttpServletResponse resp) {
-
-        Context ctx = ContextHolder.get();
+    private void setSessionToContext(Context ctx) {
+        HttpServletRequest req = ctx.getHttpRequest();
         AuthInfo authInfo = new AuthInfo();
         authInfo.setAuthenticated(false);
         ctx.setAuthInfo(authInfo);
@@ -147,8 +142,8 @@ public class Dispatcher extends HttpServlet {
         
     }
 
-    private void setResponseCookie(HttpServletRequest req, HttpServletResponse resp) {
-        Context ctx = ContextHolder.get();
+    private void setResponseCookie(Context ctx) {
+        HttpServletResponse resp = ctx.getHttpResponse();
         String sessionId = ctx.getSessionId();
         if (sessionId == null) return;
         SessionManager manager = ConfigHolder.SESSION_MANAGER;
@@ -167,41 +162,15 @@ public class Dispatcher extends HttpServlet {
             );
         }
     }
-    private boolean checkLogin() {
-        Context ctx = ContextHolder.get();
 
-        String className = ctx.getClassName();
-        if (ConfigHolder.AUTH_EXCLUDE_LIST.contains(className)) return true;
-
-        AuthInfo authInfo = ctx.getAuthInfo();
-        if (authInfo.getAuthenticated()) return true;
+    private void send401(Context ctx) {
         
-        return false;
-    }
-
-    private boolean checkPermission() {
-        Context ctx = ContextHolder.get();
-        AuthInfo authInfo = ctx.getAuthInfo();
-
-        List<String> perms = authInfo.getPerms();
-        String className = ctx.getClassFullName();
-        
-        if (className == null) return false;
-
-        if (ConfigHolder.AUTH_EXCLUDE_LIST.contains(className)) return true;
-        if (ConfigHolder.AUTH_DEFAULT_PERM_LIST.contains(className)) return true;
-        
-        if (perms == null) return false;
-        if (perms.contains(className)) return true;
-        
-        return false;
-    }
-
-    private void send401(HttpServletRequest req, HttpServletResponse resp) {
+        ctx.setReturnBy("send401");
+        HttpServletResponse resp = ctx.getHttpResponse();
         resp.setStatus(401);
-        resp.setContentType("application/json;charset=UTF-8");
-
         resp.setContentType("text/html;charset=UTF-8");
+        // resp.setContentType("application/json;charset=UTF-8");
+
         try {
             PrintWriter out = resp.getWriter();
             out.write("<!DOCTYPE html><html><head><title>Error</title></head><body>");
@@ -215,10 +184,11 @@ public class Dispatcher extends HttpServlet {
         }
     }
 
-    private void send403(HttpServletRequest req, HttpServletResponse resp) {
+    private void send403(Context ctx) {
+        
+        ctx.setReturnBy("send403");
+        HttpServletResponse resp = ctx.getHttpResponse();
         resp.setStatus(403);
-        resp.setContentType("application/json;charset=UTF-8");
-
         resp.setContentType("text/html;charset=UTF-8");
         try {
             PrintWriter out = resp.getWriter();
@@ -233,11 +203,13 @@ public class Dispatcher extends HttpServlet {
         }
     }
 
-    private void send404(HttpServletRequest req, HttpServletResponse resp) {
+    private void send404(Context ctx) {
+        ctx.setReturnBy("send404");
+        HttpServletResponse resp = ctx.getHttpResponse();
         resp.setStatus(404);
-        resp.setContentType("application/json;charset=UTF-8");
-
         resp.setContentType("text/html;charset=UTF-8");
+        // resp.setContentType("application/json;charset=UTF-8");
+
         try {
             PrintWriter out = resp.getWriter();
             out.write("<!DOCTYPE html><html><head><title>Error</title></head><body>");
@@ -251,8 +223,10 @@ public class Dispatcher extends HttpServlet {
         }
     }
     
-    private void send405(HttpServletRequest req, HttpServletResponse resp) {
-        resp.setStatus(404);
+    private void send405(Context ctx) {
+        ctx.setReturnBy("send405");
+        HttpServletResponse resp = ctx.getHttpResponse();
+        resp.setStatus(405);
         resp.setContentType("text/html;charset=UTF-8");
         try {
             PrintWriter out = resp.getWriter();
@@ -267,10 +241,10 @@ public class Dispatcher extends HttpServlet {
         }
     }
     
-    private void send500(HttpServletRequest req, HttpServletResponse resp){
+    private void send500(Context ctx) {
+        ctx.setReturnBy("send500");
+        HttpServletResponse resp = ctx.getHttpResponse();
         resp.setStatus(500);
-        resp.setContentType("application/json;charset=UTF-8");
-
         resp.setContentType("text/html;charset=UTF-8");
         try {
             PrintWriter out = resp.getWriter();
@@ -280,31 +254,70 @@ public class Dispatcher extends HttpServlet {
             out.write("</body></html>");
             out.flush();
         } catch (IOException ie) {
-            Log.error(LOGTAG, "send404 io error");
+            Log.error(LOGTAG, "send500 io error");
             ie.printStackTrace();
         }
         
     }
     
-    private void sendErrorJson(HttpServletRequest req, HttpServletResponse resp, ErrorJson err) {
-        String errMsg = "%s[%s:%s]".formatted(
+    private void sendHandlerJsonError(Context ctx, HandlerJsonError err) {
+        ctx.setReturnBy("sendHandlerJsonError");
+        HttpServletResponse resp = ctx.getHttpResponse();
+        String errMsg = "%s[%s][%s:%s]".formatted(
             err.getClass().getSimpleName(),
-            err.code,
+            err.getStatus(),
+            err.getCode(),
             err.getMessage()
         );
         Log.error(LOGTAG, errMsg);
-        resp.setStatus(200);
+        resp.setStatus(err.getStatus());
         resp.setContentType("application/json;charset=utf-8");
         try {
             JSONMAPPER.writeValue(
                 resp.getOutputStream(),
-                Map.of("code", err.code, "message", err.getMessage())
+                Map.of("code", err.getCode(), "message", err.getMessage())
             );
-        } catch (Exception jsonEx) {
-            Log.error(LOGTAG, jsonEx.getMessage());
+        } catch (Exception e) {
+            Log.error(LOGTAG, e.getMessage());
+        }
+    }
+    
+    private void sendHandlerTextError(Context ctx, HandlerTextError err) {
+        ctx.setReturnBy("sendHandlerTextError");
+        HttpServletResponse resp = ctx.getHttpResponse();
+        String errMsg = "%s[%s][%s:%s]".formatted(
+            err.getClass().getSimpleName(),
+            err.getStatus(),
+            err.getCode(),
+            err.getMessage()
+        );
+        Log.error(LOGTAG, errMsg);
+        resp.setStatus(err.getStatus());
+        resp.setContentType("text/plain;charset=utf-8");
+        try {
+            resp.getWriter().write(err.getCode() + ":" + err.getMessage());
+        } catch (Exception e) {
+            Log.error(LOGTAG, e.getMessage());
         }
     }
 
+    private void fallback(Context ctx) {
+        ctx.setReturnBy("fallback");
+        HttpServletResponse resp = ctx.getHttpResponse();
+        resp.setStatus(200);
+        resp.setContentType("text/html;charset=UTF-8");
+        try {
+            Path path = Path.of(getServletContext().getRealPath("/"), "index.html");
+            String html = Files.readString(path, StandardCharsets.UTF_8);
+            PrintWriter out = resp.getWriter();
+            out.write(html);
+            out.flush();
+        } catch (IOException ie) {
+            Log.error(LOGTAG, "send404 io error");
+            ie.printStackTrace();
+        }
+    }
+    
     @SuppressWarnings("unchecked")
     private Map<String, Object> buildParamMap(HttpServletRequest req) 
             throws ServletException, IOException{

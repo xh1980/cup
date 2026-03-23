@@ -1,17 +1,23 @@
-package com.embrace.cup.api;
+package com.embrace.cup.auth;
 
 import java.util.List;
+import java.util.Map;
 
 import com.embrace.cup.zoo.Context;
 import com.embrace.cup.zoo.Handler;
 import com.embrace.cup.zoo.ResponseWeb;
+import com.embrace.cup.zoo.AuthInfo;
 
-public class TaskFind implements Handler {
+
+
+public class Logout implements Handler {
+
     @Override
-    public  ResponseWeb handle(Context ctx){
-        return ctx.renderJson(ctx.getParameters());
+    public ResponseWeb handle(Context ctx) {
+        
+        AuthInfo.logout();
+        return ctx.renderJson(Map.of("message", "logout success"));
     }
-
     @Override
     public List<String> allowedMethods() {
         return List.of("POST");
@@ -22,6 +28,6 @@ public class TaskFind implements Handler {
     }
     @Override
     public Boolean PermissionRequired() {
-       return true;
+       return false;
     }
 }
